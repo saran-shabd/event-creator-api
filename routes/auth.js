@@ -7,8 +7,8 @@ const { Pool } = require('pg')
 const {
   containsEmptyString,
   validateEmail,
-  encryptStr,
-  decryptStr
+  hashStr,
+  verifyHashStr
 } = require('../utils/string')
 
 // import token utility functions
@@ -49,7 +49,7 @@ router.post('/register', (request, response) => {
         })
 
       // encrypt password
-      password = encryptStr(password)
+      password = hashStr(password)
 
       // sign user access token
       const userAccessToken = encodeToken(
@@ -103,7 +103,7 @@ router.post(
   verifyTokenMiddleware(USER_ACCESS_TOKEN),
   (request, response) => {
     const { name, email, password } = request.decryptToken.decoded
-    const userAccessToken = decryptStr(request.body.token)
+    const userAccessToken = request.body.token
 
     pool
       .query(
@@ -115,6 +115,11 @@ router.post(
           .json({ status: true, message: 'user registered successfully' })
       })
       .catch(error => {
+        if (error.code === '23505')
+          return response
+            .status(200)
+            .json({ status: true, message: 'user is already registered' })
+
         console.log(error)
         response
           .status(500)
@@ -122,5 +127,53 @@ router.post(
       })
   }
 )
+
+router.post('/login', (request, response) => {
+  let { email, password } = request.body
+
+  // check for invalid arguments
+  if (containsEmptyString([email, password]) || !validateEmail(email))
+    return response
+      .status(400)
+      .json({ status: false, message: 'invalid arguments' })
+
+  // convert all characters of email to lowercase
+  email = email.toString().toLowerCase()
+
+  // login user
+  pool
+    .query(
+      `SELECT password, user_access_token FROM users WHERE email='${email}'`
+    )
+    .then(data => {
+      // check if user is registered
+      if (data.rowCount === 0)
+        return response
+          .status(400)
+          .json({ status: false, message: 'user is not registered' })
+
+      // check user password
+      if (!verifyHashStr(data.rows[0].password, password))
+        return response.status(400).json({
+          status: false,
+          message: 'incorrect password'
+        })
+
+      // return user access token
+      response.status(200).json({
+        status: true,
+        message: 'user logged in successfully',
+        data: {
+          token: data.rows[0].user_access_token
+        }
+      })
+    })
+    .catch(error => {
+      console.log(error)
+      response
+        .status(500)
+        .json({ status: false, message: 'internal server error' })
+    })
+})
 
 module.exports = router
