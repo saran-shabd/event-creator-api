@@ -1,0 +1,9 @@
+# package manager
+node_modules/
+package-lock.json
+
+# environment variables
+.env
+
+# email templates
+templates/
